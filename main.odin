@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:strings"
 import magic "libmagic-odin"
 import rl "vendor:raylib"
+import "sump"
 
 FONT :: #config(FONT, "FiraCode-Regular.ttf")
 FONT_DATA :: #load(FONT)
@@ -218,6 +219,11 @@ draw_hints :: proc(hint_text: cstring) {
 }
 
 main :: proc() {
+    when ODIN_DEBUG {
+        context.allocator = sump.start()
+        defer sump.end()
+    }
+
     cookie := magic.open(magic.MIME_TYPE)
     if cookie == nil {
         fmt.eprintln("Error allocating cookie")
