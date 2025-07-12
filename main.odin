@@ -46,12 +46,12 @@ Action :: enum {
 Key_Map :: [Action]rl.KeyboardKey
 State :: struct {
     mode: Mode,
-    hints_enabled: bool,
     image: rl.Image,
     texture: rl.Texture2D,
     pos: rl.Vector2,
     scale: f32,
     binds: Key_Map,
+    hints_enabled: bool,
     hints: [Mode]string,
 }
 
@@ -65,10 +65,12 @@ init_state :: proc(allocator := context.allocator) -> State {
 }
 
 deinit_state :: proc(s: ^State) {
+    // NOTE: leaving this here for the time being, in case we need to consider deallocating with future features
 }
 
+// map keys configured in `binds.ini` to actions and raylib keys
 load_binds :: proc(state: ^State, allocator := context.allocator) {
-    cfg, _ := os.read_entire_file("binds.ini", allocator)
+    cfg, _ := os.read_entire_file("binds.ini", allocator) // TODO: error handling
     defer delete(cfg)
     it := ini.iterator_from_string(string(cfg))
 
@@ -76,7 +78,7 @@ load_binds :: proc(state: ^State, allocator := context.allocator) {
         action, k_ok := fmt.string_to_enum_value(Action, k)
         bind, v_ok := fmt.string_to_enum_value(rl.KeyboardKey, v)
 
-        // TODO: wtf? fix this
+        // TODO: *good* error handling
         if !k_ok || !v_ok {
             panic("fix binds")
         }
@@ -85,12 +87,14 @@ load_binds :: proc(state: ^State, allocator := context.allocator) {
     }
 }
 
+// validate font mime type and load from embedded data
 load_font :: proc(mime_type: cstring) -> rl.Font {
     suffix: cstring
     switch mime_type {
     case "font/sfnt": suffix = ".ttf"
     case "application/vnd.ms-opentype": suffix = ".otf"
     case:
+        // TODO: consider unconditionally embedding the fallback font and loading it here with a warning instead
         fmt.eprintfln("Error: This application was compiled with an unsupported font type. Supported types are OTF and TTF. The compiled font is %q.", FONT)
         os.exit(1)
     }
@@ -102,7 +106,6 @@ is_supported_filetype :: proc(mime_type: cstring) -> bool {
     for t in SUPPORTED_FILETYPES {
         if t == mime_type do return true
     }
-
     return false
 }
 
@@ -135,6 +138,7 @@ calc_autofill_scale :: proc(w, h: f32) -> f32 {
     return max(scale_w, scale_h)
 }
 
+// normal mode actions
 handle_normal_cmd :: proc(s: ^State) {
     if rl.IsKeyPressed(s.binds[.Mode_Move]) {
         s.mode = .Move
@@ -147,6 +151,7 @@ handle_normal_cmd :: proc(s: ^State) {
     }
 }
 
+// move mode actions
 handle_move_cmd :: proc(s: ^State) {
     if rl.IsKeyPressed(s.binds[.Move_Left]) {
         s.pos.x -= 10
@@ -164,6 +169,7 @@ handle_move_cmd :: proc(s: ^State) {
         s.pos.y -= 10
     }
 
+    // TODO: consider a more descriptive name for this action (resetting image position to center)
     if rl.IsKeyPressed(s.binds[.Reset]) {
         reset_view_pos(s)
     }
@@ -179,6 +185,7 @@ reset_view_pos :: proc(v: ^State) {
     v.pos = {w, h}
 }
 
+// size mode actions
 handle_size_cmd :: proc(s: ^State) {
     if rl.IsKeyPressed(s.binds[.Zoom_In]) {
         s.scale += 0.1
@@ -209,6 +216,7 @@ handle_size_cmd :: proc(s: ^State) {
     }
 }
 
+// TODO: consider making background/text colors configurable
 draw_hints :: proc(hint_text: cstring) {
     w := rl.GetRenderWidth()
     h := rl.GetRenderHeight()
@@ -244,9 +252,7 @@ main :: proc() {
 
     filename := strings.clone_to_cstring(os.args[1])
     defer delete(filename)
-
     result := magic.file(cookie, filename)
-
 
     if result == nil {
         fmt.eprintfln("Error opening file: %s\n", magic.error(cookie))
@@ -258,7 +264,6 @@ main :: proc() {
         return
     }
 
-
     rl.SetConfigFlags({.VSYNC_HINT, .WINDOW_RESIZABLE, .WINDOW_MAXIMIZED, .MSAA_4X_HINT})
     rl.InitWindow(0, 0, fmt.ctprintf("iv - %s", filename))
     rl.SetTargetFPS(rl.GetMonitorRefreshRate(0))
@@ -269,15 +274,14 @@ main :: proc() {
 
     state := init_state()
     state.image, state.texture = load_image(filename)
-    defer deinit_state(&state)
+    // defer deinit_state(&state)
     rl.SetExitKey(state.binds[.Quit])
 
     first_fit := false
     frame_count := 0
 
     for !rl.WindowShouldClose() {
-        key := rl.GetKeyPressed()
-
+        // run auto fit after the first frame when RenderWidth/RenderHeight are reliably populated
         if !first_fit && frame_count >= 1 {
             state.scale = calc_autofit_scale(f32(state.texture.width), f32(state.texture.height))
             first_fit = true
@@ -322,7 +326,7 @@ main :: proc() {
             handle_size_cmd(&state)
             if state.hints_enabled {
                 draw_hints(fmt.ctprintf(
-                    "[SIZ] %s: zoom in | %s: zoom out | %s: fit width | %s: fit height | %s: auto fit | %s: auto fill",
+                    "[SIZE] %s: zoom in | %s: zoom out | %s: fit width | %s: fit height | %s: auto fit | %s: auto fill",
                     state.binds[.Zoom_In],
                     state.binds[.Zoom_Out],
                     state.binds[.Fit_Width],
@@ -333,6 +337,7 @@ main :: proc() {
             }
         }
 
+        // we can stop counting frames once the first fit is done
         if !first_fit do frame_count += 1
     }
 }
