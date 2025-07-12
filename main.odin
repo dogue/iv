@@ -5,6 +5,7 @@ import "core:encoding/ini"
 import "core:os"
 import "core:fmt"
 import "core:strings"
+import "core:strconv"
 import magic "libmagic-odin"
 import rl "vendor:raylib"
 import "sump"
@@ -42,14 +43,25 @@ Action :: enum {
     Reset,
 }
 
+Option :: enum {
+    Invert_Mouse_Zoom,
+}
+
 Key_Map :: [Action]rl.KeyboardKey
+Option_Map :: [Option]string
+
+Config :: struct {
+    binds: Key_Map,
+    options: Option_Map
+}
+
 State :: struct {
     mode: Mode,
     image: rl.Image,
     texture: rl.Texture2D,
     pos: rl.Vector2,
     scale: f32,
-    binds: Key_Map,
+    config: Config,
     hints_enabled: bool,
     hints: [Mode]string,
     hint_font: rl.Font,
@@ -64,13 +76,25 @@ init_state :: proc(allocator := context.allocator) -> State {
     return s
 }
 
+deinit_state :: proc(s: ^State) {
+    for &o in s.config.options {
+        delete(o)
+    }
+}
+
 // map keys configured in `binds.ini` to actions and raylib keys
 load_binds :: proc(state: ^State, allocator := context.allocator) {
-    cfg, _ := os.read_entire_file("binds.ini", allocator) // TODO: error handling
+    cfg, _ := os.read_entire_file("config.ini", allocator) // TODO: error handling
     defer delete(cfg)
     it := ini.iterator_from_string(string(cfg))
 
     for k, v in ini.iterate(&it) {
+        // non-bind options
+        if opt, ok := fmt.string_to_enum_value(Option, k); ok {
+            state.config.options[opt] = strings.clone(v, allocator)
+            continue
+        }
+
         action, k_ok := fmt.string_to_enum_value(Action, k)
         bind, v_ok := fmt.string_to_enum_value(rl.KeyboardKey, v)
 
@@ -79,7 +103,7 @@ load_binds :: proc(state: ^State, allocator := context.allocator) {
             panic("fix binds")
         }
 
-        state.binds[action] = bind
+        state.config.binds[action] = bind
     }
 }
 
@@ -136,12 +160,12 @@ calc_autofill_scale :: proc(w, h: f32) -> f32 {
 
 // normal mode actions
 handle_normal_cmd :: proc(s: ^State) {
-    if rl.IsKeyPressed(s.binds[.Mode_Move]) {
+    if rl.IsKeyPressed(s.config.binds[.Mode_Move]) {
         s.mode = .Move
         return
     }
 
-    if rl.IsKeyPressed(s.binds[.Mode_Size]) {
+    if rl.IsKeyPressed(s.config.binds[.Mode_Size]) {
         s.mode = .Size
         return
     }
@@ -149,28 +173,28 @@ handle_normal_cmd :: proc(s: ^State) {
 
 // move mode actions
 handle_move_cmd :: proc(s: ^State) {
-    if rl.IsKeyPressed(s.binds[.Move_Left]) {
+    if rl.IsKeyPressed(s.config.binds[.Move_Left]) {
         s.pos.x -= 10
     }
 
-    if rl.IsKeyPressed(s.binds[.Move_Right]) {
+    if rl.IsKeyPressed(s.config.binds[.Move_Right]) {
         s.pos.x += 10
     }
 
-    if rl.IsKeyPressed(s.binds[.Move_Down]) {
+    if rl.IsKeyPressed(s.config.binds[.Move_Down]) {
         s.pos.y += 10
     }
 
-    if rl.IsKeyPressed(s.binds[.Move_Up]) {
+    if rl.IsKeyPressed(s.config.binds[.Move_Up]) {
         s.pos.y -= 10
     }
 
     // TODO: consider a more descriptive name for this action (resetting image position to center)
-    if rl.IsKeyPressed(s.binds[.Reset]) {
+    if rl.IsKeyPressed(s.config.binds[.Reset]) {
         reset_view_pos(s)
     }
 
-    if rl.IsKeyPressed(s.binds[.Mode_Normal]) {
+    if rl.IsKeyPressed(s.config.binds[.Mode_Normal]) {
         s.mode = .Normal
     }
 }
@@ -183,31 +207,31 @@ reset_view_pos :: proc(v: ^State) {
 
 // size mode actions
 handle_size_cmd :: proc(s: ^State) {
-    if rl.IsKeyPressed(s.binds[.Zoom_In]) {
+    if rl.IsKeyPressed(s.config.binds[.Zoom_In]) {
         s.scale += 0.1
     }
 
-    if rl.IsKeyPressed(s.binds[.Zoom_Out]) {
+    if rl.IsKeyPressed(s.config.binds[.Zoom_Out]) {
         s.scale -= 0.1
     }
 
-    if rl.IsKeyPressed(s.binds[.Fit_Width]) {
+    if rl.IsKeyPressed(s.config.binds[.Fit_Width]) {
         s.scale = f32(rl.GetRenderWidth()) / f32(s.texture.width)
     }
 
-    if rl.IsKeyPressed(s.binds[.Fit_Height]) {
+    if rl.IsKeyPressed(s.config.binds[.Fit_Height]) {
         s.scale = f32(rl.GetRenderHeight()) / f32(s.texture.height)
     }
 
-    if rl.IsKeyPressed(s.binds[.Auto_Fit]) {
+    if rl.IsKeyPressed(s.config.binds[.Auto_Fit]) {
         s.scale = calc_autofit_scale(f32(s.texture.width), f32(s.texture.height))
     }
 
-    if rl.IsKeyPressed(s.binds[.Auto_Fill]) {
+    if rl.IsKeyPressed(s.config.binds[.Auto_Fill]) {
         s.scale = calc_autofill_scale(f32(s.texture.width), f32(s.texture.height))
     }
 
-    if rl.IsKeyPressed(s.binds[.Mode_Normal]) {
+    if rl.IsKeyPressed(s.config.binds[.Mode_Normal]) {
         s.mode = .Normal
     }
 }
@@ -266,14 +290,21 @@ main :: proc() {
 
 
     state := init_state()
+    defer deinit_state(&state)
+
     state.image, state.texture = load_image(filename)
+    rl.SetExitKey(state.config.binds[.Quit])
+
     font_mime_type := magic.buffer(cookie, raw_data(FONT_DATA), uintptr(len(FONT_DATA))) // get embedded font MIME type (OTF/TTF are supported)
     state.hint_font = load_font(font_mime_type)
-    rl.SetExitKey(state.binds[.Quit])
 
     first_fit := false
     frame_count := 0
-    prev_mouse_pos := rl.GetMousePosition()
+
+    invert_zoom, parse_ok := strconv.parse_bool(state.config.options[.Invert_Mouse_Zoom])
+    if !parse_ok {
+        fmt.eprintfln("Failed to parse boolean value for option 'Invert_Mouse_Zoom'. Got: %q", state.config.options[.Invert_Mouse_Zoom])
+    }
 
     for !rl.WindowShouldClose() {
         // run auto fit after the first frame when RenderWidth/RenderHeight are reliably populated
@@ -288,10 +319,10 @@ main :: proc() {
         }
 
         // increase zoom increment from 1% to 10% when shift held
-        zoom_speed := f32(rl.IsKeyDown(.LEFT_SHIFT) ? 0.1 : 0.01)
+        zoom_speed := f32(rl.IsKeyDown(.LEFT_SHIFT) ? 0.1 : 0.01) * (invert_zoom ? -1 : 1)
         state.scale = clamp(state.scale + rl.GetMouseWheelMove() * zoom_speed, 0.05, 100)
 
-        if rl.IsKeyPressed(state.binds[.Toggle_Hints]) {
+        if rl.IsKeyPressed(state.config.binds[.Toggle_Hints]) {
             state.hints_enabled = !state.hints_enabled
         }
 
@@ -307,10 +338,10 @@ main :: proc() {
             if state.hints_enabled {
                 draw_hints(state, fmt.ctprintf(
                     "[NOR] %s: move | %s: size | %s: toggle hints | %s: quit",
-                    state.binds[.Mode_Move],
-                    state.binds[.Mode_Size],
-                    state.binds[.Toggle_Hints],
-                    state.binds[.Quit]
+                    state.config.binds[.Mode_Move],
+                    state.config.binds[.Mode_Size],
+                    state.config.binds[.Toggle_Hints],
+                    state.config.binds[.Quit]
                 ))
             }
 
@@ -319,10 +350,10 @@ main :: proc() {
             if state.hints_enabled {
                 draw_hints(state, fmt.ctprintf(
                     "[MOV] %s: left | %s: right | %s: up | %s: down",
-                    state.binds[.Move_Left],
-                    state.binds[.Move_Right],
-                    state.binds[.Move_Up],
-                    state.binds[.Move_Down],
+                    state.config.binds[.Move_Left],
+                    state.config.binds[.Move_Right],
+                    state.config.binds[.Move_Up],
+                    state.config.binds[.Move_Down],
                 ))
             }
 
@@ -331,12 +362,12 @@ main :: proc() {
             if state.hints_enabled {
                 draw_hints(state, fmt.ctprintf(
                     "[SIZE] %s: zoom in | %s: zoom out | %s: fit width | %s: fit height | %s: auto fit | %s: auto fill",
-                    state.binds[.Zoom_In],
-                    state.binds[.Zoom_Out],
-                    state.binds[.Fit_Width],
-                    state.binds[.Fit_Height],
-                    state.binds[.Auto_Fit],
-                    state.binds[.Auto_Fill],
+                    state.config.binds[.Zoom_In],
+                    state.config.binds[.Zoom_Out],
+                    state.config.binds[.Fit_Width],
+                    state.config.binds[.Fit_Height],
+                    state.config.binds[.Auto_Fit],
+                    state.config.binds[.Auto_Fill],
                 ))
             }
         }
