@@ -64,10 +64,6 @@ init_state :: proc(allocator := context.allocator) -> State {
     return s
 }
 
-deinit_state :: proc(s: ^State) {
-    // NOTE: leaving this here for the time being, in case we need to consider deallocating with future features
-}
-
 // map keys configured in `binds.ini` to actions and raylib keys
 load_binds :: proc(state: ^State, allocator := context.allocator) {
     cfg, _ := os.read_entire_file("binds.ini", allocator) // TODO: error handling
@@ -274,7 +270,6 @@ main :: proc() {
 
     state := init_state()
     state.image, state.texture = load_image(filename)
-    // defer deinit_state(&state)
     rl.SetExitKey(state.binds[.Quit])
 
     first_fit := false
