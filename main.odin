@@ -11,7 +11,6 @@ import "sump"
 
 FONT :: #config(FONT, "FiraCode-Regular.ttf")
 FONT_DATA :: #load(FONT)
-hint_font: rl.Font
 
 SUPPORTED_FILETYPES :: [?]cstring{
     "image/jpeg",
@@ -53,6 +52,7 @@ State :: struct {
     binds: Key_Map,
     hints_enabled: bool,
     hints: [Mode]string,
+    hint_font: rl.Font,
 }
 
 init_state :: proc(allocator := context.allocator) -> State {
@@ -213,13 +213,13 @@ handle_size_cmd :: proc(s: ^State) {
 }
 
 // TODO: consider making background/text colors configurable
-draw_hints :: proc(hint_text: cstring) {
+draw_hints :: proc(s: State, hint_text: cstring) {
     w := rl.GetRenderWidth()
     h := rl.GetRenderHeight()
 
     // background rect
     rl.DrawRectangle(0, h - 20, w, 20, {18, 18, 18, 255})
-    rl.DrawTextEx(hint_font, hint_text, {6, f32(h - 18)}, 16, 0, rl.WHITE)
+    rl.DrawTextEx(s.hint_font, hint_text, {6, f32(h - 18)}, 16, 0, rl.WHITE)
 }
 
 main :: proc() {
@@ -264,12 +264,11 @@ main :: proc() {
     rl.InitWindow(0, 0, fmt.ctprintf("iv - %s", filename))
     rl.SetTargetFPS(rl.GetMonitorRefreshRate(0))
 
-    // get embedded font MIME type (OTF/TTF are supported)
-    font_mime_type := magic.buffer(cookie, raw_data(FONT_DATA), uintptr(len(FONT_DATA)))
-    hint_font = load_font(font_mime_type)
 
     state := init_state()
     state.image, state.texture = load_image(filename)
+    font_mime_type := magic.buffer(cookie, raw_data(FONT_DATA), uintptr(len(FONT_DATA))) // get embedded font MIME type (OTF/TTF are supported)
+    state.hint_font = load_font(font_mime_type)
     rl.SetExitKey(state.binds[.Quit])
 
     first_fit := false
@@ -296,7 +295,7 @@ main :: proc() {
         case .Normal:
             handle_normal_cmd(&state)
             if state.hints_enabled {
-                draw_hints(fmt.ctprintf(
+                draw_hints(state, fmt.ctprintf(
                     "[NOR] %s: move | %s: size | %s: toggle hints | %s: quit",
                     state.binds[.Mode_Move],
                     state.binds[.Mode_Size],
@@ -308,7 +307,7 @@ main :: proc() {
         case .Move:
             handle_move_cmd(&state)
             if state.hints_enabled {
-                draw_hints(fmt.ctprintf(
+                draw_hints(state, fmt.ctprintf(
                     "[MOV] %s: left | %s: right | %s: up | %s: down",
                     state.binds[.Move_Left],
                     state.binds[.Move_Right],
@@ -320,7 +319,7 @@ main :: proc() {
         case .Size:
             handle_size_cmd(&state)
             if state.hints_enabled {
-                draw_hints(fmt.ctprintf(
+                draw_hints(state, fmt.ctprintf(
                     "[SIZE] %s: zoom in | %s: zoom out | %s: fit width | %s: fit height | %s: auto fit | %s: auto fill",
                     state.binds[.Zoom_In],
                     state.binds[.Zoom_Out],

@@ -9,6 +9,10 @@ Current features:
 - Scaling actions include automatic best fit, automatic fill (with cropping), fit to image width or height, and manual zooming in/out.
 - Movement keys for adjusting image position within the window.
 
+Planned features:
+- Configurable background/text color for keybind hints.
+- Mouse panning/zooming.
+
 Possible future features (TBD):
 - Open directory/multiple files with key actions to cycle through files.
 - Support for animated images (GIF).
