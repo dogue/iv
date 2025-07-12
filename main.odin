@@ -260,7 +260,7 @@ main :: proc() {
         return
     }
 
-    rl.SetConfigFlags({.VSYNC_HINT, .WINDOW_RESIZABLE, .WINDOW_MAXIMIZED, .MSAA_4X_HINT})
+    rl.SetConfigFlags({.VSYNC_HINT, .WINDOW_RESIZABLE, .WINDOW_MAXIMIZED})
     rl.InitWindow(0, 0, fmt.ctprintf("iv - %s", filename))
     rl.SetTargetFPS(rl.GetMonitorRefreshRate(0))
 
@@ -273,6 +273,7 @@ main :: proc() {
 
     first_fit := false
     frame_count := 0
+    prev_mouse_pos := rl.GetMousePosition()
 
     for !rl.WindowShouldClose() {
         // run auto fit after the first frame when RenderWidth/RenderHeight are reliably populated
@@ -280,6 +281,15 @@ main :: proc() {
             state.scale = calc_autofit_scale(f32(state.texture.width), f32(state.texture.height))
             first_fit = true
         }
+
+        if rl.IsMouseButtonDown(.LEFT) {
+            // NOTE: unsure why doubling the delta is needed, but it is in order to have the texture move at the same speed as the cursor
+            state.pos += rl.GetMouseDelta() * 2
+        }
+
+        // increase zoom increment from 1% to 10% when shift held
+        zoom_speed := f32(rl.IsKeyDown(.LEFT_SHIFT) ? 0.1 : 0.01)
+        state.scale = clamp(state.scale + rl.GetMouseWheelMove() * zoom_speed, 0.05, 100)
 
         if rl.IsKeyPressed(state.binds[.Toggle_Hints]) {
             state.hints_enabled = !state.hints_enabled
@@ -329,6 +339,12 @@ main :: proc() {
                     state.binds[.Auto_Fill],
                 ))
             }
+        }
+
+        if state.hints_enabled {
+            text := fmt.ctprintf("Zoom: %d%%", int(state.scale * 100))
+            w := rl.MeasureTextEx(state.hint_font, text, 16, 0)
+            rl.DrawTextEx(state.hint_font, text, {f32(rl.GetRenderWidth()) - w.x - 6, f32(rl.GetRenderHeight() - 18)}, 16, 0, rl.WHITE)
         }
 
         // we can stop counting frames once the first fit is done
