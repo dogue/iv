@@ -17,4 +17,5 @@ Possible future features (TBD):
 If you decide to try this software and encounter any bugs and/or interface pain points, please feel free to open an issue here.
 
 Screenshot:
+
 ![screenshot](screenshot.png)
