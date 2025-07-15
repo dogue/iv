@@ -48,10 +48,12 @@ Option :: enum {
 }
 
 Key_Map :: [Action]rl.KeyboardKey
+Key_Map2 :: [Action]Key_Bind
 Option_Map :: [Option]string
 
 Config :: struct {
     binds: Key_Map,
+    binds2: Key_Map2,
     options: Option_Map
 }
 
@@ -79,31 +81,6 @@ init_state :: proc(allocator := context.allocator) -> State {
 deinit_state :: proc(s: ^State) {
     for &o in s.config.options {
         delete(o)
-    }
-}
-
-// map keys configured in `binds.ini` to actions and raylib keys
-load_binds :: proc(state: ^State, allocator := context.allocator) {
-    cfg, _ := os.read_entire_file("config.ini", allocator) // TODO: error handling
-    defer delete(cfg)
-    it := ini.iterator_from_string(string(cfg))
-
-    for k, v in ini.iterate(&it) {
-        // non-bind options
-        if opt, ok := fmt.string_to_enum_value(Option, k); ok {
-            state.config.options[opt] = strings.clone(v, allocator)
-            continue
-        }
-
-        action, k_ok := fmt.string_to_enum_value(Action, k)
-        bind, v_ok := fmt.string_to_enum_value(rl.KeyboardKey, v)
-
-        // TODO: *good* error handling
-        if !k_ok || !v_ok {
-            panic("fix binds")
-        }
-
-        state.config.binds[action] = bind
     }
 }
 
