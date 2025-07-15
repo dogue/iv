@@ -318,8 +318,11 @@ main :: proc() {
             state.pos += rl.GetMouseDelta() * 2
         }
 
-        // increase zoom increment from 1% to 10% when shift held
-        zoom_speed := f32(rl.IsKeyDown(.LEFT_SHIFT) ? 0.1 : 0.01) * (invert_zoom ? -1 : 1)
+        // reduce zoom speed when shift held
+        base_zoom_speed := f32(rl.IsKeyDown(.LEFT_SHIFT) ? 0.01 : 0.1) * (invert_zoom ? -1 : 1)
+
+        // make zoom speed scale with image zoom for smoother changes
+        zoom_speed := base_zoom_speed * state.scale
         state.scale = clamp(state.scale + rl.GetMouseWheelMove() * zoom_speed, 0.05, 100)
 
         if rl.IsKeyPressed(state.config.binds[.Toggle_Hints]) {
