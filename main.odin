@@ -315,7 +315,10 @@ main :: proc() {
 
         if rl.IsMouseButtonDown(.LEFT) {
             // NOTE: unsure why doubling the delta is needed, but it is in order to have the texture move at the same speed as the cursor
+            rl.HideCursor()
             state.pos += rl.GetMouseDelta() * 2
+        } else {
+            rl.ShowCursor()
         }
 
         // reduce zoom speed when shift held
