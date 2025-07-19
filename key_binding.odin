@@ -28,7 +28,7 @@ load_binds :: proc(state: ^State, allocator := context.allocator) {
             panic("fix binds")
         }
 
-        state.config.binds[action] = bind
+        // state.config.binds[action] = bind
     }
 }
 
