@@ -7,8 +7,15 @@ import "core:fmt"
 import "core:strings"
 import "core:strconv"
 import magic "libmagic-odin"
-import rl "vendor:raylib"
 import "sump"
+import sdl "vendor:sdl2"
+import img "vendor:sdl2/image"
+import ttf "vendor:sdl2/ttf"
+
+SDL_FLAGS: sdl.InitFlags = { .VIDEO }
+IMG_FLAGS: img.InitFlags = { .JPG, .PNG, .TIF, .WEBP }
+WIN_FLAGS: sdl.WindowFlags = { .SHOWN, .RESIZABLE }
+RENDER_FLAGS: sdl.RendererFlags = { .ACCELERATED }
 
 FONT :: #config(FONT, "FiraCode-Regular.ttf")
 FONT_DATA :: #load(FONT)
@@ -47,32 +54,44 @@ Option :: enum {
     Invert_Mouse_Zoom,
 }
 
-Key_Map :: [Action]rl.KeyboardKey
+// Key_Map :: [Action]rl.KeyboardKey
 Key_Map2 :: [Action]Key_Bind
 Option_Map :: [Option]string
 
 Config :: struct {
-    binds: Key_Map,
+    // binds: Key_Map,
     binds2: Key_Map2,
     options: Option_Map
 }
 
+Image :: struct {
+    texture: ^sdl.Texture,
+    scale: f32,
+    pos: [2]f32,
+    // The original image dimensions are stored to use later as a base size when scaling
+    size: [2]f32,
+}
+
+Status_Bar :: struct {
+    enabled: bool,
+    text: [Mode]string,
+    font: ^ttf.Font,
+}
+
 State :: struct {
     mode: Mode,
-    image: rl.Image,
-    texture: rl.Texture2D,
-    pos: rl.Vector2,
-    scale: f32,
+    window: ^sdl.Window,
+    renderer: ^sdl.Renderer,
+    image: Image,
     config: Config,
-    hints_enabled: bool,
-    hints: [Mode]string,
-    hint_font: rl.Font,
+    status: Status_Bar,
 }
 
 init_state :: proc(allocator := context.allocator) -> State {
     s := State {
-        hints_enabled = true,
-        scale = 1,
+        status = Status_Bar {
+            enabled = true,
+        }
     }
     load_binds(&s, allocator)
     return s
@@ -84,55 +103,104 @@ deinit_state :: proc(s: ^State) {
     }
 }
 
-// validate font mime type and load from embedded data
-load_font :: proc(mime_type: cstring) -> rl.Font {
-    suffix: cstring
-    switch mime_type {
-    case "font/sfnt": suffix = ".ttf"
-    case "application/vnd.ms-opentype": suffix = ".otf"
-    case:
-        // TODO: consider unconditionally embedding the fallback font and loading it here with a warning instead
-        fmt.eprintfln("Error: This application was compiled with an unsupported font type. Supported types are OTF and TTF. The compiled font is %q.", FONT)
-        os.exit(1)
+init_sdl :: proc(s: ^State) -> (ok: bool) {
+    if sdl.Init(SDL_FLAGS) != 0 {
+        fmt.eprintfln("Error initializing SDL2: %s", sdl.GetError())
+        return false
     }
 
-    return rl.LoadFontFromMemory(suffix, raw_data(FONT_DATA), i32(len(FONT_DATA)), 16, nil, 0)
-}
-
-is_supported_filetype :: proc(mime_type: cstring) -> bool {
-    for t in SUPPORTED_FILETYPES {
-        if t == mime_type do return true
+    if img.Init(IMG_FLAGS) != IMG_FLAGS {
+        fmt.eprintfln("Error initializing SDL2_img: %s", img.GetError())
+        return false
     }
-    return false
+
+    if ttf.Init() != 0 {
+        fmt.eprintfln("Error initializing SDL2_ttf: %s", ttf.GetError())
+        return false
+    } 
+
+    s.window = sdl.CreateWindow(
+        "iv",
+        sdl.WINDOWPOS_UNDEFINED,
+        sdl.WINDOWPOS_UNDEFINED,
+        0,
+        0,
+        WIN_FLAGS,
+    )
+    if s.window == nil {
+        fmt.eprintfln("Error create window: %s", sdl.GetError())
+        return false
+    }
+
+    s.renderer = sdl.CreateRenderer(s.window, -1, RENDER_FLAGS)
+    if s.renderer == nil {
+        fmt.eprintfln("Error creating renderer: %s", sdl.GetError())
+        return false
+    }
+
+    return true
 }
 
-load_image :: proc(filename: cstring) -> (img: rl.Image, tex: rl.Texture2D) {
-    img = rl.LoadImage(filename)
-    tex = rl.LoadTextureFromImage(img)
-    rl.SetTextureFilter(tex, .TRILINEAR)
-    return img, tex
+load_font :: proc(s: ^State) {
+    font_rwop := sdl.RWFromConstMem(raw_data(FONT_DATA), i32(len(FONT_DATA)))
+    s.status.font = ttf.OpenFontRW(font_rwop, freesrc = false, ptsize = 16)
 }
 
-calc_scaled_position :: proc(v: State) -> (pos: rl.Vector2) {
-    sw := f32(rl.GetRenderWidth()) + v.pos.x
-    sh := f32(rl.GetRenderHeight()) + v.pos.y
-    tw := f32(v.texture.width)
-    th := f32(v.texture.height)
-    pos.x = sw / 2 - (tw * v.scale) / 2
-    pos.y = sh / 2 - (th * v.scale) / 2
-    return pos
+load_image :: proc(s: ^State, filename: cstring) -> (ok: bool) {
+    s.image.texture = img.LoadTexture(s.renderer, filename)
+    if s.image.texture == nil {
+        fmt.eprintfln("Error loading image: %s", img.GetError())
+        return false
+    }
+
+    w, h: i32
+    if sdl.QueryTexture(s.image.texture, nil, nil, &w, &h) != 0 {
+        fmt.eprintfln("Error querying texture dimensions: %s", sdl.GetError())
+        return false
+    }
+    s.image.size.xy = {f32(w), f32(h)}
+
+    if sdl.SetTextureScaleMode(s.image.texture, .Best) != 0 {
+        fmt.eprintfln("Error setting texture scale mode: %s", img.GetError())
+        return false
+    }
+
+    return true
 }
 
-calc_autofit_scale :: proc(w, h: f32) -> f32 {
-    scale_w := f32(rl.GetRenderWidth()) / w
-    scale_h := f32(rl.GetRenderHeight()) / h
-    return min(scale_w, scale_h)
+// Returns an `FRect` with W/H scaled up or down from the orinal image dimensions
+get_scaled_rect :: proc(s: ^State) -> (rect: sdl.FRect) {
+    rect.w = s.image.size.x * s.image.scale 
+    rect.h = s.image.size.y * s.image.scale
+    return rect
 }
 
-calc_autofill_scale :: proc(w, h: f32) -> f32 {
-    scale_w := f32(rl.GetRenderWidth()) / w
-    scale_h := f32(rl.GetRenderHeight()) / h
-    return max(scale_w, scale_h)
+Scaling_Mode :: enum {
+    // Scale to match larger axis, ensuring the entire image is visible
+    Fit,
+    // Scale to match smaller axis, enduring the entire window is filled
+    Fill,
+    // Scale to original image size
+    Real,
+}
+
+set_scale_by_mode :: proc(s: ^State, mode: Scaling_Mode) -> (ok: bool) {
+    // Query rendering contraints and calculate scaling factors for width and height
+    w_, h_: i32
+    if sdl.GetRendererOutputSize(s.renderer, &w_, &h_) != 0 {
+        fmt.eprintfln("Error getting render output size: %s", sdl.GetError())
+        return false
+    }
+    w := f32(w_) / s.image.size.x
+    h := f32(h_) / s.image.size.y
+
+    switch mode {
+    case .Fit: s.image.scale = min(w, h)
+    case .Fill: s.image.scale = max(w, h)
+    case .Real: s.image.scale = 1
+    }
+
+    return true
 }
 
 // normal mode actions
